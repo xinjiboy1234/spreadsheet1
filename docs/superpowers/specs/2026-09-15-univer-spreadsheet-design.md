@@ -139,9 +139,11 @@ SpreadSheet/
 
 **循环行规则（裁定）**
 
-- v1 **仅支持单行模板**（`startRow == endRow`）；多行块写入 schema.warnings 且填充时跳过该 loop，并在响应 `warnings` 中说明
-- 模板行样式为蓝本；N 条数据 → N 行；填充后去掉 `#`/`/` 标记与未替换干净的循环语法
+- 行列索引：**与 Univer 一致，0-based**（`startRow` / `endRow`）
+- v1 **仅支持单行模板**（`startRow == endRow`）；多行块写入 schema.warnings 且填充时跳过该 loop
+- 展开算法：模板行保留为第 1 条；若 N>1，在其下方插入 N−1 行并复制样式/单元格后写入其余项；若同 sheet 多个 loop，按 `startRow` **从大到小**处理以免行号错位
 - 数组为空或缺少数组键 → **删除该模板行**
+- 填充后去掉 `#`/`/` 标记文本
 - 简单字段全表替换；请求未提供的字段 → 保留占位符原文，响应 `warnings` 增加一项
 - 循环标记不匹配：保存成功，schema.warnings 记录；填充时 **跳过该 loop**（HTTP 200），响应 `warnings` 说明，不返回 400
 - 合并单元格与循环行重叠：不做自动拆分；若检测到则 warnings，并跳过该 loop
@@ -182,18 +184,26 @@ SpreadSheet/
 ```json
 {
   "title": "可选标题",
-  "workbookJson": null,
+  "workbookJson": "{...Univer workbook JSON string...}",
   "remark": null
 }
 ```
 
-- `workbookJson` 省略或 `null`：创建空白 workbook —— **裁定：前端用 Univer 创建空表后提交 JSON**，后端不捏造 Univer 结构；若请求无 workbookJson 则 400
-- `workbookJson` 有值：作为 Version 1 存库并扫描 schema（导入与新建共用此接口）
+- `workbookJson` **必填**（非空字符串）：作为 Version 1 存库并扫描 schema
+- **新建空白:** 前端用 Univer 创建空表 → 取出 JSON → `POST /documents`
+- **导入 xlsx:** 前端 Univer 解析 → 同上接口
+- 缺少或空白 `workbookJson` → 400；后端不捏造 Univer 结构
 - 响应：同 `GET /documents/{id}`
 
-### 5.2 POST /documents/{id}/fill
+### 5.2 填充与编辑器状态（裁定）
 
-- **始终返回 JSON**（无 format 双路径）
+- 服务端 fill / fill-save **只读已持久化的当前版本**（`CurrentVersionId`），不接受请求体中的临时 `workbookJson`，也不按 `?version=` 历史版本填充
+- **前端约定:** 打开填充面板前：若编辑器有未保存修改，先自动 `PUT` 保存（失败则中止填充并提示）；若 URL 带 `?version=`（正在看历史），填充按钮提示「请先保存为当前版本后再填充」或引导用户先保存（保存会把该历史内容追加为新当前版本）后再填
+- 试填成功后：前端用返回的 `workbookJson` **替换编辑器内容**（视为脏数据）；用户可再导出或手动保存；试填本身不写库
+
+### 5.3 POST /documents/{id}/fill
+
+- **始终返回 JSON**
 - Body：填充数据对象（任意 JSON object）
 - 基于 **当前版本** WorkbookJson 填充（不修改已存版本）
 - 响应：
@@ -206,9 +216,9 @@ SpreadSheet/
 }
 ```
 
-前端：可加载 `workbookJson` 预览，或立刻 Univer 导出下载。非法 body → 400 `{ "message": "..." }`。
+非法 body → 400 `{ "message": "..." }`。
 
-### 5.3 POST /documents/{id}/fill-save
+### 5.4 POST /documents/{id}/fill-save
 
 - Body：
 
@@ -221,6 +231,7 @@ SpreadSheet/
 
 - 基于当前版本填充 → 新建 Document（Title 默认 `原标题-填充`，或使用传入 title）→ Version 1 = 填充后 workbook + 重新扫描的 schema
 - 响应：`{ "id": "<newDocumentId>", "warnings": [] }`
+  （同样要求前端先保存脏数据；历史版本视图下禁用另存填充）
 
 **错误约定**
 
@@ -249,7 +260,7 @@ SpreadSheet/
 
 ### 6.3 演示数据
 
-- **种子归属:** 后端启动时 Seed 写入「销售订单模板」Document（若库中尚无同名种子）
+- **种子归属:** 后端启动时 Seed 读取仓库内静态文件 `Seed/sales-order-template.workbook.json`（实现时用 Univer 导出一份最小模板提交进库），若尚无种子文档则写入
 - 含 `{{CustomerName}}`、`{{OrderDate}}` 与单行 `{{#Items}}`…`{{/Items}}`
 - 前端 FillPanel 内置与种子匹配的样例 JSON 按钮
 
