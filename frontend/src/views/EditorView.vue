@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { get, getVersion, save } from '../api/documents'
+import { fill, fillSave, get, getVersion, save } from '../api/documents'
+import FillPanel from '../components/FillPanel.vue'
 import UniverSheetHost from '../components/UniverSheetHost.vue'
 import { useEditorDirty } from '../composables/useEditorDirty'
+import type { TemplateSchema } from '../types/document'
 import { emptyWorkbookJson } from '../utils/emptyWorkbook'
 import { exportExcelFile } from '../utils/excelIo'
 
@@ -21,7 +23,15 @@ const versionQueryId = computed(() => {
 })
 const viewingHistory = computed(() => versionQueryId.value !== '')
 
-const { templateDirty, markTemplateEdit, resetAfterSave } = useEditorDirty()
+const {
+  templateDirty,
+  previewDirty,
+  markTemplateEdit,
+  markPreview,
+  clearPreview,
+  clearAll,
+  resetAfterSave,
+} = useEditorDirty()
 
 const sheetHost = ref<SheetHostExpose | null>(null)
 const title = ref('')
@@ -30,8 +40,12 @@ const workbookJson = ref<string | null>(null)
 const ready = ref(false)
 const loading = ref(false)
 const saving = ref(false)
+const fillBusy = ref(false)
+const fillPanelOpen = ref(false)
 const error = ref('')
 const status = ref('')
+const warnings = ref<string[]>([])
+const cachedSchema = ref<TemplateSchema | null>(null)
 
 function draftKey(id: string) {
   return `draft:${id}`
@@ -49,6 +63,10 @@ function readDraft(id: string): string | null {
   return sessionStorage.getItem(draftKey(id))
 }
 
+function showWarnings(list: string[] | undefined | null) {
+  warnings.value = list?.length ? [...list] : []
+}
+
 async function loadDocument() {
   const id = documentId.value
   if (!id) {
@@ -59,8 +77,11 @@ async function loadDocument() {
   loading.value = true
   error.value = ''
   status.value = ''
+  warnings.value = []
   ready.value = false
   workbookJson.value = null
+  fillPanelOpen.value = false
+  cachedSchema.value = null
 
   try {
     const historyVersionId = versionQueryId.value
@@ -72,6 +93,7 @@ async function loadDocument() {
       title.value = doc.title || '未命名文档'
       versionNo.value = ver.versionNo
       workbookJson.value = ver.workbookJson || emptyWorkbookJson()
+      cachedSchema.value = ver.schema ?? null
       ready.value = true
       return
     }
@@ -79,6 +101,7 @@ async function loadDocument() {
     const { data } = await get(id)
     title.value = data.title || '未命名文档'
     versionNo.value = data.versionNo
+    cachedSchema.value = data.schema ?? null
 
     const draft = readDraft(id)
     if (draft != null && draft !== '') {
@@ -107,9 +130,53 @@ function onSheetChange() {
   status.value = ''
 }
 
+/** Persist current editor as template when needed before fill/fill-save. */
+async function ensureTemplateSavedForFill(): Promise<boolean> {
+  if (previewDirty.value) {
+    return true
+  }
+  if (!templateDirty.value) {
+    return true
+  }
+  const id = documentId.value
+  if (!id || !sheetHost.value) {
+    error.value = '无法保存模板'
+    return false
+  }
+
+  saving.value = true
+  error.value = ''
+  status.value = ''
+  const json = sheetHost.value.getWorkbookJson()
+  try {
+    const { data } = await save(id, {
+      workbookJson: json,
+      title: title.value || undefined,
+    })
+    title.value = data.title || title.value
+    versionNo.value = data.versionNo
+    cachedSchema.value = data.schema ?? null
+    clearDraft(id)
+    resetAfterSave()
+    status.value = '模板已保存'
+    return true
+  } catch {
+    writeDraft(id, json)
+    error.value = '保存模板失败，已写入本地草稿；已中止填充'
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
 async function onSave() {
   const id = documentId.value
   if (!id || !sheetHost.value || saving.value) return
+
+  if (previewDirty.value) {
+    const ok = window.confirm('将把填充结果保存为新版本，模板占位符会丢失')
+    if (!ok) return
+  }
 
   saving.value = true
   error.value = ''
@@ -123,8 +190,9 @@ async function onSave() {
     })
     title.value = data.title || title.value
     versionNo.value = data.versionNo
+    cachedSchema.value = data.schema ?? null
     clearDraft(id)
-    resetAfterSave()
+    clearAll()
     status.value = '保存成功'
     if (viewingHistory.value) {
       await router.replace({ path: `/editor/${id}` })
@@ -165,8 +233,85 @@ async function onExportExcel() {
   }
 }
 
-function onFillPlaceholder() {
-  alert('填充功能即将实现')
+async function openFillPanel() {
+  if (viewingHistory.value || !ready.value) return
+  const saved = await ensureTemplateSavedForFill()
+  if (!saved) return
+  fillPanelOpen.value = true
+}
+
+async function onTryFill(data: object) {
+  const id = documentId.value
+  if (!id || !sheetHost.value || fillBusy.value) return
+
+  fillBusy.value = true
+  error.value = ''
+  status.value = ''
+  try {
+    const saved = await ensureTemplateSavedForFill()
+    if (!saved) return
+
+    const { data: result } = await fill(id, data)
+    sheetHost.value.loadWorkbookJson(result.workbookJson)
+    markPreview()
+    if (result.schema) {
+      cachedSchema.value = result.schema
+    }
+    showWarnings(result.warnings)
+    status.value = '试填成功'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '试填失败'
+  } finally {
+    fillBusy.value = false
+  }
+}
+
+async function onDiscardPreview() {
+  const id = documentId.value
+  if (!id || !sheetHost.value || fillBusy.value) return
+
+  fillBusy.value = true
+  error.value = ''
+  status.value = ''
+  warnings.value = []
+  try {
+    const { data } = await get(id)
+    sheetHost.value.loadWorkbookJson(data.workbookJson || emptyWorkbookJson())
+    title.value = data.title || title.value
+    versionNo.value = data.versionNo
+    cachedSchema.value = data.schema ?? null
+    clearPreview()
+    status.value = '已放弃试填'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '放弃试填失败'
+  } finally {
+    fillBusy.value = false
+  }
+}
+
+async function onFillSave(payload: { data: object; title?: string }) {
+  const id = documentId.value
+  if (!id || fillBusy.value) return
+
+  fillBusy.value = true
+  error.value = ''
+  status.value = ''
+  try {
+    const saved = await ensureTemplateSavedForFill()
+    if (!saved) return
+
+    const { data: result } = await fillSave(id, {
+      data: payload.data as Record<string, unknown>,
+      title: payload.title,
+    })
+    showWarnings(result.warnings)
+    fillPanelOpen.value = false
+    await router.push(`/editor/${result.id}`)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '另存失败'
+  } finally {
+    fillBusy.value = false
+  }
 }
 
 watch(
@@ -192,13 +337,19 @@ watch(
         />
         <span v-if="versionNo != null" class="meta">v{{ versionNo }}</span>
         <span v-if="templateDirty" class="dirty">未保存</span>
+        <span v-if="previewDirty" class="dirty preview">试填预览</span>
       </div>
       <div class="toolbar-right">
         <button type="button" class="btn primary" :disabled="saving || !ready" @click="onSave">
           {{ saving ? '保存中…' : '保存' }}
         </button>
         <button type="button" class="btn" :disabled="!ready" @click="onExportExcel">导出</button>
-        <button type="button" class="btn" :disabled="viewingHistory" @click="onFillPlaceholder">
+        <button
+          type="button"
+          class="btn"
+          :disabled="viewingHistory || !ready || saving"
+          @click="openFillPanel"
+        >
           填充
         </button>
         <button type="button" class="btn" @click="onHistory">历史</button>
@@ -208,6 +359,9 @@ watch(
     <p v-if="viewingHistory" class="banner warn">正在查看历史版本</p>
     <p v-if="error" class="banner error">{{ error }}</p>
     <p v-else-if="status" class="banner ok">{{ status }}</p>
+    <ul v-if="warnings.length" class="banner warn warnings">
+      <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
+    </ul>
     <p v-if="loading" class="banner muted">加载中…</p>
 
     <UniverSheetHost
@@ -216,6 +370,18 @@ watch(
       class="sheet"
       :workbook-json="workbookJson"
       @change="onSheetChange"
+    />
+
+    <FillPanel
+      :document-id="documentId"
+      :open="fillPanelOpen"
+      :schema="cachedSchema"
+      :busy="fillBusy || saving"
+      @close="fillPanelOpen = false"
+      @try-fill="onTryFill"
+      @discard="onDiscardPreview"
+      @fill-save="onFillSave"
+      @export="onExportExcel"
     />
   </main>
 </template>
@@ -264,6 +430,10 @@ watch(
 .dirty {
   color: #b45309;
   font-size: 0.875rem;
+}
+
+.dirty.preview {
+  color: #1d4ed8;
 }
 
 .btn {
@@ -320,8 +490,15 @@ watch(
   color: #666;
 }
 
+.warnings {
+  list-style: disc;
+  padding-left: 1.75rem;
+  margin: 0;
+}
+
 .sheet {
   flex: 1 1 auto;
   min-height: 0;
 }
 </style>
+

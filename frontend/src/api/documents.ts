@@ -4,6 +4,10 @@ import type {
   DocumentListItem,
   DocumentVersionDetail,
   DocumentVersionSummary,
+  FillResponse,
+  FillSaveRequest,
+  FillSaveResponse,
+  TemplateSchema,
   UpdateDocumentRequest,
 } from '../types/document'
 import { http } from './http'
@@ -32,4 +36,15 @@ export function getVersion(id: string, versionId: string) {
   return http.get<DocumentVersionDetail>(`/documents/${id}/versions/${versionId}`)
 }
 
-// fill / schema — Task 11
+export function getSchema(id: string) {
+  return http.get<TemplateSchema>(`/documents/${id}/schema`)
+}
+
+export function fill(id: string, data: object) {
+  return http.post<FillResponse>(`/documents/${id}/fill`, data)
+}
+
+export function fillSave(id: string, body: FillSaveRequest) {
+  return http.post<FillSaveResponse>(`/documents/${id}/fill-save`, body)
+}
+
