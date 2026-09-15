@@ -4,7 +4,7 @@ import { UniverSheetsCorePreset } from '@univerjs/preset-sheets-core'
 import UniverPresetSheetsCoreZhCN from '@univerjs/preset-sheets-core/locales/zh-CN'
 import { CommandType, createUniver, LocaleType, mergeLocales } from '@univerjs/presets'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { emptyWorkbook } from '../utils/emptyWorkbook'
+import { emptyWorkbook, emptyWorkbookJson } from '../utils/emptyWorkbook'
 
 import '@univerjs/preset-sheets-core/lib/index.css'
 
@@ -22,31 +22,46 @@ const container = ref<HTMLElement | null>(null)
 let univerInstance: Univer | null = null
 let univerAPIInstance: FUniver | null = null
 let commandDisposable: IDisposable | null = null
-/** Suppress change emit while applying programmatic load/create. */
-let suppressChange = false
+/**
+ * Nested load/create suppression depth. Change emits only when depth === 0.
+ * Avoids races where a second load clears a boolean while the first is still settling.
+ */
+let suppressChangeDepth = 0
+
+function beginSuppressChange() {
+  suppressChangeDepth += 1
+}
+
+function endSuppressChange() {
+  // Defer so createWorkbook's own mutations do not mark dirty.
+  queueMicrotask(() => {
+    suppressChangeDepth = Math.max(0, suppressChangeDepth - 1)
+  })
+}
 
 function parseWorkbookData(json: string | null | undefined): Partial<IWorkbookData> {
   if (json == null || json.trim() === '') {
     return emptyWorkbook()
   }
-  return JSON.parse(json) as Partial<IWorkbookData>
+  try {
+    return JSON.parse(json) as Partial<IWorkbookData>
+  } catch (err) {
+    console.warn('[UniverSheetHost] invalid workbookJson; falling back to emptyWorkbook()', err)
+    return emptyWorkbook()
+  }
 }
 
 function getWorkbookJson(): string {
   const snapshot = univerAPIInstance?.getActiveWorkbook()?.save()
   if (!snapshot) {
-    return emptyWorkbookJsonFallback()
+    return emptyWorkbookJson()
   }
   return JSON.stringify(snapshot)
 }
 
-function emptyWorkbookJsonFallback(): string {
-  return JSON.stringify(emptyWorkbook())
-}
-
 function loadWorkbookJson(json: string) {
   if (!univerAPIInstance) return
-  suppressChange = true
+  beginSuppressChange()
   try {
     const active = univerAPIInstance.getActiveWorkbook()
     const unitId = active?.getId()
@@ -55,10 +70,7 @@ function loadWorkbookJson(json: string) {
     }
     univerAPIInstance.createWorkbook(parseWorkbookData(json))
   } finally {
-    // Defer so createWorkbook's own mutations do not mark dirty.
-    queueMicrotask(() => {
-      suppressChange = false
-    })
+    endSuppressChange()
   }
 }
 
@@ -66,7 +78,7 @@ function attachChangeListener(api: FUniver) {
   // Prefer CommandExecuted + MUTATION: only snapshot-affecting edits (not scroll/selection).
   // If MUTATION filtering proves too noisy/quiet in practice, fall back to emitting on all commands.
   commandDisposable = api.addEvent(api.Event.CommandExecuted, (event) => {
-    if (suppressChange) return
+    if (suppressChangeDepth !== 0) return
     if (event.type !== CommandType.MUTATION) return
     emit('change')
   })
@@ -91,13 +103,11 @@ onMounted(() => {
   univerAPIInstance = univerAPI
   attachChangeListener(univerAPI)
 
-  suppressChange = true
+  beginSuppressChange()
   try {
     univerAPI.createWorkbook(parseWorkbookData(props.workbookJson))
   } finally {
-    queueMicrotask(() => {
-      suppressChange = false
-    })
+    endSuppressChange()
   }
 })
 
