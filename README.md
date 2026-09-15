@@ -2,7 +2,7 @@
 
 Vue 3 + ASP.NET Core app for WYSIWYG Excel editing, version history, and template fill (simple fields + single-row loops).
 
-Workbook snapshots are stored as Univer `IWorkbookData` JSON in SQLite. Excel import/export runs in the browser via `@mertdeveci55/univer-import-export` — not the official Univer Pro exchange server.
+Workbook snapshots are stored as Univer `IWorkbookData` JSON in SQLite. Excel import/export runs **client-side** via **LuckyExcel** (`@mertdeveci55/univer-import-export`) — not the official Univer Pro exchange / collaboration server.
 
 ## Prerequisites
 
