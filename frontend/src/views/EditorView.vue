@@ -5,6 +5,7 @@ import { get, save } from '../api/documents'
 import UniverSheetHost from '../components/UniverSheetHost.vue'
 import { useEditorDirty } from '../composables/useEditorDirty'
 import { emptyWorkbookJson } from '../utils/emptyWorkbook'
+import { exportExcelFile } from '../utils/excelIo'
 
 type SheetHostExpose = {
   getWorkbookJson: () => string
@@ -124,8 +125,19 @@ function onHistory() {
   void router.push(`/editor/${documentId.value}/versions`)
 }
 
-function onExportPlaceholder() {
-  alert('导出功能即将实现')
+async function onExportExcel() {
+  if (!sheetHost.value || !ready.value) return
+  error.value = ''
+  status.value = ''
+  try {
+    const snapshot = JSON.parse(sheetHost.value.getWorkbookJson()) as object
+    const base = (title.value || '未命名文档').trim() || '未命名文档'
+    const fileName = base.toLowerCase().endsWith('.xlsx') ? base : `${base}.xlsx`
+    await exportExcelFile(snapshot, fileName)
+    status.value = '导出成功'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '导出失败'
+  }
 }
 
 function onFillPlaceholder() {
@@ -150,7 +162,7 @@ onMounted(() => {
         <button type="button" class="btn primary" :disabled="saving || !ready" @click="onSave">
           {{ saving ? '保存中…' : '保存' }}
         </button>
-        <button type="button" class="btn" @click="onExportPlaceholder">导出</button>
+        <button type="button" class="btn" :disabled="!ready" @click="onExportExcel">导出</button>
         <button type="button" class="btn" @click="onFillPlaceholder">填充</button>
         <button type="button" class="btn" @click="onHistory">历史</button>
       </div>

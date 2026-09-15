@@ -4,12 +4,15 @@ import { useRouter } from 'vue-router'
 import { create, list } from '../api/documents'
 import type { DocumentListItem } from '../types/document'
 import { emptyWorkbookJson } from '../utils/emptyWorkbook'
+import { importExcelFile } from '../utils/excelIo'
 
 const router = useRouter()
 const documents = ref<DocumentListItem[]>([])
 const loading = ref(false)
 const creating = ref(false)
+const importing = ref(false)
 const error = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
 
 async function loadList() {
   loading.value = true
@@ -40,8 +43,44 @@ async function onCreate() {
   }
 }
 
-function onImportPlaceholder() {
-  alert('导入功能即将实现')
+function onImportClick() {
+  if (importing.value) return
+  fileInput.value?.click()
+}
+
+function isExcelFile(file: File) {
+  const name = file.name.toLowerCase()
+  return name.endsWith('.xlsx') || name.endsWith('.xls')
+}
+
+function titleFromFileName(fileName: string) {
+  return fileName.replace(/\.(xlsx|xls)$/i, '') || '未命名文档'
+}
+
+async function onImportFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  if (!isExcelFile(file)) {
+    alert('请选择 Excel 文件')
+    return
+  }
+
+  importing.value = true
+  error.value = ''
+  try {
+    const snapshot = await importExcelFile(file)
+    const { data } = await create({
+      title: titleFromFileName(file.name),
+      workbookJson: JSON.stringify(snapshot),
+    })
+    await router.push(`/editor/${data.id}`)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '导入失败'
+    importing.value = false
+  }
 }
 
 function formatUpdatedAt(value: string) {
@@ -63,7 +102,16 @@ onMounted(() => {
         <button type="button" class="btn primary" :disabled="creating" @click="onCreate">
           {{ creating ? '新建中…' : '新建' }}
         </button>
-        <button type="button" class="btn" @click="onImportPlaceholder">导入</button>
+        <button type="button" class="btn" :disabled="importing" @click="onImportClick">
+          {{ importing ? '导入中…' : '导入' }}
+        </button>
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+          class="file-input"
+          @change="onImportFileChange"
+        />
       </div>
     </header>
 
@@ -117,6 +165,10 @@ onMounted(() => {
 .actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.file-input {
+  display: none;
 }
 
 .btn {
