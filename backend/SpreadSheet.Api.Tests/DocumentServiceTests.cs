@@ -338,4 +338,61 @@ public class DocumentServiceTests : IDisposable
             _sut.UpdateAsync(created.Id, new UpdateDocumentRequest { WorkbookJson = "" }));
         Assert.Equal(400, ex.StatusCode);
     }
+
+    [Fact]
+    public async Task Create_InvalidWorkbookJson_Throws400()
+    {
+        var ex = await Assert.ThrowsAsync<DocumentServiceException>(() =>
+            _sut.CreateAsync(new CreateDocumentRequest { WorkbookJson = "{not-json" }));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("workbookJson 不是合法 JSON", ex.Message);
+    }
+
+    [Fact]
+    public async Task Update_InvalidWorkbookJson_Throws400()
+    {
+        var created = await _sut.CreateAsync(new CreateDocumentRequest { WorkbookJson = MinimalWorkbook });
+
+        var ex = await Assert.ThrowsAsync<DocumentServiceException>(() =>
+            _sut.UpdateAsync(created.Id, new UpdateDocumentRequest { WorkbookJson = "not json at all" }));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("workbookJson 不是合法 JSON", ex.Message);
+        Assert.Equal(1, (await _sut.GetAsync(created.Id)).VersionNo);
+    }
+
+    [Fact]
+    public async Task FillSave_NonObjectData_Throws400()
+    {
+        var created = await _sut.CreateAsync(new CreateDocumentRequest { WorkbookJson = MinimalWorkbook });
+
+        using var arr = JsonDocument.Parse("[1,2]");
+        var ex = await Assert.ThrowsAsync<DocumentServiceException>(() =>
+            _sut.FillSaveAsync(created.Id, new FillSaveRequest { Data = arr.RootElement.Clone() }));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("填充数据无效", ex.Message);
+
+        using var prim = JsonDocument.Parse("\"hello\"");
+        ex = await Assert.ThrowsAsync<DocumentServiceException>(() =>
+            _sut.FillSaveAsync(created.Id, new FillSaveRequest { Data = prim.RootElement.Clone() }));
+        Assert.Equal(400, ex.StatusCode);
+
+        ex = await Assert.ThrowsAsync<DocumentServiceException>(() =>
+            _sut.FillSaveAsync(created.Id, new FillSaveRequest { Data = default }));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("填充数据无效", ex.Message);
+
+        Assert.Equal(1, await _db.Documents.CountAsync());
+    }
+
+    [Fact]
+    public async Task Update_VersionNo_IsMaxPlusOne()
+    {
+        var created = await _sut.CreateAsync(new CreateDocumentRequest { WorkbookJson = MinimalWorkbook });
+        await _sut.UpdateAsync(created.Id, new UpdateDocumentRequest { WorkbookJson = MinimalWorkbook, Remark = "v2" });
+        var v3 = await _sut.UpdateAsync(created.Id, new UpdateDocumentRequest { WorkbookJson = MinimalWorkbook, Remark = "v3" });
+
+        Assert.Equal(3, v3.VersionNo);
+        var versions = await _sut.ListVersionsAsync(created.Id);
+        Assert.Equal(new[] { 3, 2, 1 }, versions.Select(v => v.VersionNo).ToArray());
+    }
 }

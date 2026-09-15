@@ -32,6 +32,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.WorkbookJson).IsRequired();
             entity.Property(e => e.TemplateSchemaJson).IsRequired();
 
+            entity.HasIndex(e => new { e.DocumentId, e.VersionNo }).IsUnique();
+
             // Document 1→N Versions; cascade delete with Document is OK
             entity.HasOne(e => e.Document)
                 .WithMany(d => d.Versions)
