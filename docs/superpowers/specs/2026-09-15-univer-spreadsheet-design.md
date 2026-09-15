@@ -205,7 +205,9 @@ SpreadSheet/
   - 否则若 `templateDirty`：先自动 `PUT`；失败则中止并提示
   - 若 URL 带 `?version=`：禁用填充；保存成功后导航到 `/editor/:id`（去掉 version query）再允许填充
 - 试填成功：加载返回的 `workbookJson`，`previewDirty=true`，`templateDirty=false`
-- 「放弃试填」：`GET /documents/{id}` 重载当前版本，清除 `previewDirty`
+- 工具栏确认保存成功后（含 previewDirty 确认保存）：`previewDirty=false`，`templateDirty=false`
+- FillPanel「导出下载」：导出**当前编辑器**内容（若尚未试填则先可选手动试填）；不单独改变脏标记
+- API 中 `workbookJson` 一律为 **JSON 字符串**（UTF-8），不是嵌套 object
 
 ### 5.3 POST /documents/{id}/fill
 
