@@ -1,0 +1,34 @@
+{
+  "id": "workbook-sales-order",
+  "name": "销售订单模板",
+  "appVersion": "0.25.1",
+  "locale": "zhCN",
+  "styles": {},
+  "sheetOrder": ["sheet-1"],
+  "sheets": {
+    "sheet-1": {
+      "id": "sheet-1",
+      "name": "Sheet1",
+      "rowCount": 100,
+      "columnCount": 20,
+      "cellData": {
+        "0": {
+          "0": { "v": "客户:{{CustomerName}}" },
+          "1": { "v": "日期:{{OrderDate}}" }
+        },
+        "1": {
+          "1": { "v": "名称" },
+          "2": { "v": "数量" },
+          "3": { "v": "金额" }
+        },
+        "2": {
+          "0": { "v": "{{#Items}}" },
+          "1": { "v": "{{Items.Name}}" },
+          "2": { "v": "{{Items.Qty}}" },
+          "3": { "v": "{{Items.Amount}}" },
+          "4": { "v": "{{/Items}}" }
+        }
+      }
+    }
+  }
+}
