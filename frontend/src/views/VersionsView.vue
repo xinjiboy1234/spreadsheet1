@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listVersions } from '../api/documents'
 import type { DocumentVersionSummary } from '../types/document'
@@ -48,9 +48,13 @@ function onOpenVersion(version: DocumentVersionSummary) {
   })
 }
 
-onMounted(() => {
-  void loadVersions()
-})
+watch(
+  documentId,
+  () => {
+    void loadVersions()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

@@ -74,6 +74,7 @@ async function loadDocument() {
     return
   }
 
+  clearAll()
   loading.value = true
   error.value = ''
   status.value = ''
