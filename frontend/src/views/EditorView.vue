@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { get, save } from '../api/documents'
+import { get, getVersion, save } from '../api/documents'
 import UniverSheetHost from '../components/UniverSheetHost.vue'
 import { useEditorDirty } from '../composables/useEditorDirty'
 import { emptyWorkbookJson } from '../utils/emptyWorkbook'
@@ -15,6 +15,11 @@ type SheetHostExpose = {
 const route = useRoute()
 const router = useRouter()
 const documentId = computed(() => String(route.params.id ?? ''))
+const versionQueryId = computed(() => {
+  const v = route.query.version
+  return typeof v === 'string' && v !== '' ? v : ''
+})
+const viewingHistory = computed(() => versionQueryId.value !== '')
 
 const { templateDirty, markTemplateEdit, resetAfterSave } = useEditorDirty()
 
@@ -58,6 +63,19 @@ async function loadDocument() {
   workbookJson.value = null
 
   try {
+    const historyVersionId = versionQueryId.value
+    if (historyVersionId) {
+      const [{ data: doc }, { data: ver }] = await Promise.all([
+        get(id),
+        getVersion(id, historyVersionId),
+      ])
+      title.value = doc.title || '未命名文档'
+      versionNo.value = ver.versionNo
+      workbookJson.value = ver.workbookJson || emptyWorkbookJson()
+      ready.value = true
+      return
+    }
+
     const { data } = await get(id)
     title.value = data.title || '未命名文档'
     versionNo.value = data.versionNo
@@ -108,6 +126,9 @@ async function onSave() {
     clearDraft(id)
     resetAfterSave()
     status.value = '保存成功'
+    if (viewingHistory.value) {
+      await router.replace({ path: `/editor/${id}` })
+    }
   } catch (e) {
     writeDraft(id, json)
     error.value = '保存失败，已写入本地草稿'
@@ -149,7 +170,7 @@ function onFillPlaceholder() {
 }
 
 watch(
-  documentId,
+  [documentId, versionQueryId],
   () => {
     void loadDocument()
   },
@@ -177,11 +198,14 @@ watch(
           {{ saving ? '保存中…' : '保存' }}
         </button>
         <button type="button" class="btn" :disabled="!ready" @click="onExportExcel">导出</button>
-        <button type="button" class="btn" @click="onFillPlaceholder">填充</button>
+        <button type="button" class="btn" :disabled="viewingHistory" @click="onFillPlaceholder">
+          填充
+        </button>
         <button type="button" class="btn" @click="onHistory">历史</button>
       </div>
     </header>
 
+    <p v-if="viewingHistory" class="banner warn">正在查看历史版本</p>
     <p v-if="error" class="banner error">{{ error }}</p>
     <p v-else-if="status" class="banner ok">{{ status }}</p>
     <p v-if="loading" class="banner muted">加载中…</p>
@@ -280,6 +304,11 @@ watch(
 .banner.error {
   color: #b00020;
   background: #fdecea;
+}
+
+.banner.warn {
+  color: #92400e;
+  background: #fffbeb;
 }
 
 .banner.ok {
