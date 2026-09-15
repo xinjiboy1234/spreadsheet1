@@ -1,0 +1,16 @@
+# Build
+bin/
+obj/
+node_modules/
+dist/
+.vs/
+
+# Data
+*.db
+*.db-shm
+*.db-wal
+
+# Env / local
+.env
+.superpowers/
+.worktrees/
