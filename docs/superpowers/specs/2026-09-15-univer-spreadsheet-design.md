@@ -198,13 +198,14 @@ SpreadSheet/
 ### 5.2 填充与编辑器状态（裁定）
 
 - 服务端 fill / fill-save **只读已持久化的当前版本**（`CurrentVersionId`），不接受请求体中的临时 `workbookJson`，也不按 `?version=` 历史版本填充
-- 前端维护两个脏标记：`templateDirty`（用户编辑模板未保存）、`previewDirty`（试填结果已加载到编辑器、尚未另存或丢弃）
+- 前端维护两个脏标记：`templateDirty`（用户编辑**已保存模板**未保存）、`previewDirty`（试填结果已在编辑器中）
+- **脏标记规则:** 一旦 `previewDirty === true`，编辑器变更**不再**置 `templateDirty`（仍算预览态编辑）；仅「放弃试填」回到当前版本后，之后的编辑才置 `templateDirty`
 - **打开填充面板 / 发起 fill 或 fill-save 前：**
-  - 若 `templateDirty`：先自动 `PUT` 保存模板；失败则中止并提示
-  - 若仅 `previewDirty`：**禁止**自动 PUT（避免把已填充结果写成当前模板版本）；允许再次试填（仍基于库中当前版本）、允许「导出」、允许 fill-save；若用户点「保存」则明确提示「将把填充结果保存为新版本，模板占位符会丢失」并需确认
-  - 若 URL 带 `?version=`：禁用填充；提示先「保存为当前版本」（追加新 Version）后再填
-- 试填成功：前端加载返回的 `workbookJson`，设 `previewDirty=true`、`templateDirty=false`；试填本身不写库
-- 用户「放弃试填」：重新 `GET /documents/{id}` 加载当前版本，清除 `previewDirty`
+  - 若 `previewDirty`：**禁止**自动 PUT；允许再次试填（基于库中当前版本）、导出、fill-save；工具栏「保存」需确认「将把填充结果保存为新版本，模板占位符会丢失」
+  - 否则若 `templateDirty`：先自动 `PUT`；失败则中止并提示
+  - 若 URL 带 `?version=`：禁用填充；保存成功后导航到 `/editor/:id`（去掉 version query）再允许填充
+- 试填成功：加载返回的 `workbookJson`，`previewDirty=true`，`templateDirty=false`
+- 「放弃试填」：`GET /documents/{id}` 重载当前版本，清除 `previewDirty`
 
 ### 5.3 POST /documents/{id}/fill
 
