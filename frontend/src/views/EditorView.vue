@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { get, save } from '../api/documents'
 import UniverSheetHost from '../components/UniverSheetHost.vue'
@@ -110,11 +110,15 @@ async function onSave() {
     status.value = '保存成功'
   } catch (e) {
     writeDraft(id, json)
-    error.value = e instanceof Error ? e.message : '保存失败'
-    status.value = '已写入本地草稿'
+    error.value = '保存失败，已写入本地草稿'
   } finally {
     saving.value = false
   }
+}
+
+function onTitleInput() {
+  markTemplateEdit()
+  status.value = ''
 }
 
 function onBack() {
@@ -144,9 +148,13 @@ function onFillPlaceholder() {
   alert('填充功能即将实现')
 }
 
-onMounted(() => {
-  void loadDocument()
-})
+watch(
+  documentId,
+  () => {
+    void loadDocument()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -154,7 +162,13 @@ onMounted(() => {
     <header class="toolbar">
       <div class="toolbar-left">
         <button type="button" class="btn" @click="onBack">返回列表</button>
-        <input v-model="title" class="title-input" type="text" aria-label="文档标题" />
+        <input
+          v-model="title"
+          class="title-input"
+          type="text"
+          aria-label="文档标题"
+          @input="onTitleInput"
+        />
         <span v-if="versionNo != null" class="meta">v{{ versionNo }}</span>
         <span v-if="templateDirty" class="dirty">未保存</span>
       </div>
