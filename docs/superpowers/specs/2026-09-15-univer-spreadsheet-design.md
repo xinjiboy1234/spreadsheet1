@@ -16,9 +16,9 @@
 
 **成功标准**
 
-- 导入含字体/边框/填充色/合并单元格的 xlsx 后，编辑器内样式可见，导出后 Excel 中仍保留
+- 导入含字体/边框/填充色/合并单元格的 xlsx 后，编辑器内样式可见；**用户导出**后用 Excel 打开，上述样式仍保留
 - 每次保存产生可回溯版本；从历史版本打开再保存会追加新版本
-- 使用 `{{Field}}` / `{{#List}}` 约定可完成试填并下载填充后的 xlsx
+- 使用 `{{Field}}` / `{{#List}}` 约定可完成试填；试填结果在编辑器内预览后，再经 Univer 导出为 xlsx
 - 无登录；本地启动前后端即可完整体验
 
 ## 2. 约束与明确不做
@@ -30,8 +30,9 @@
 | 数据库 | SQLite + EF Core |
 | 鉴权 | 无（单机/内网共用文档列表） |
 | 占位符 | 单元格文本约定（非侧栏绑定元数据） |
+| Univer | 官方 Sheets + 导入/导出 Excel 插件（实现时锁定当时稳定版，写入 README） |
 
-**本次不做:** 登录/多租户、实时协作、公式引擎深度定制、版本差量压缩、对象存储。
+**本次不做:** 登录/多租户、实时协作、公式引擎深度定制、版本差量压缩、对象存储、服务端 multipart 解析 xlsx、文档删除 API、多行循环块（仅支持单行模板行）、合并单元格横跨循环行的自动拆分。
 
 ## 3. 架构
 
@@ -39,9 +40,20 @@
 Vue 3 (Univer Sheets)  --REST/JSON-->  ASP.NET Core Web API  --EF Core-->  SQLite
 ```
 
-- **前端:** 文档列表、Univer 编辑器、版本历史、填充面板；负责 workbook 交互与调用 API
-- **后端:** 文档/版本持久化、导入元数据、TemplateSchema 扫描、填充引擎、xlsx 导出缓存
-- **真相源:** 每次保存的 `WorkbookJson`（Univer workbook 序列化）；`XlsxBlob` 为导出缓存
+- **前端:** 文档列表、Univer 编辑器、版本历史、填充面板；负责 xlsx↔workbook 的导入/导出（WYSIWYG 唯一路径）与调用 API
+- **后端:** 文档/版本持久化、TemplateSchema 扫描、填充引擎（只改 WorkbookJson）
+- **真相源:** `WorkbookJson`（Univer workbook 序列化）
+
+**导入 / 导出裁定（消除歧义）**
+
+| 操作 | 唯一主路径 |
+|------|------------|
+| 导入 xlsx | 前端 Univer 导入插件 → `workbookJson` → `POST /documents`（带 json）建档 |
+| 用户导出 xlsx（WYSIWYG） | 前端 Univer 导出插件，基于当前编辑器 workbook |
+| 填充试填 | 后端 FillEngine 返回 `workbookJson` → 前端加载预览 → 用户再用 Univer 导出 |
+| 填充直接下载 | 后端返回填充后的 `workbookJson`；**前端**立即用 Univer 导出为文件（不在服务端用 ClosedXML 生成用户下载文件） |
+
+不在服务端维护 `XlsxBlob`；不引入 ClosedXML/NPOI 作为用户可见导出路径。
 
 **仓库结构**
 
@@ -54,8 +66,9 @@ SpreadSheet/
   backend/
     SpreadSheet.Api/
       Controllers/
-      Services/         # DocumentService, TemplateScanner, FillEngine, ExcelBridge
+      Services/         # DocumentService, TemplateScanner, FillEngine
       Data/             # DbContext, Entities
+      Seed/             # 销售订单模板种子
   docs/superpowers/specs/
   README.md
 ```
@@ -81,17 +94,21 @@ SpreadSheet/
 | VersionNo | int | 从 1 递增 |
 | Remark | string? | 可选备注 |
 | WorkbookJson | string | Univer workbook JSON（编辑态真相） |
-| XlsxBlob | byte[]? | 保存时生成的 xlsx 缓存 |
-| TemplateSchemaJson | string? | 扫描得到的模板 schema |
+| TemplateSchemaJson | string | 保存时扫描结果；无占位符时为 `{"fields":[],"loops":[],"warnings":[]}` |
 | CreatedAt | DateTimeOffset | 保存时间 |
+
+**Schema 扫描时机（裁定）**
+
+- 每次创建 Version 时（`POST /documents` 带 workbook、`PUT` 保存）同步调用 TemplateScanner，结果写入该 Version 的 `TemplateSchemaJson`
+- `GET /documents/{id}/schema` 返回 **当前版本** 已持久化的 schema，不现场重扫
+- 打开历史版本编辑时，schema 以该版本存库值为准；再保存时对新 Version 重新扫描
 
 **版本行为**
 
-- `PUT` 保存 → 插入新 Version（VersionNo = max+1），更新 Document.CurrentVersionId / UpdatedAt
-- 打开历史版本编辑 → 加载该 Version 的 WorkbookJson；再保存仍追加新 Version（不覆盖历史）
-- 导出优先用 XlsxBlob；若空则由 workbook 即时导出
+- 保存 → 插入新 Version（VersionNo = 事务内 max+1），更新 Document.CurrentVersionId / UpdatedAt / Title（若传入）
+- 打开历史版本 → 加载该 Version 的 WorkbookJson；再保存追加新 Version，不覆盖历史
 
-### 4.3 TemplateSchema（存于 TemplateSchemaJson）
+### 4.3 TemplateSchema
 
 ```json
 {
@@ -104,25 +121,30 @@ SpreadSheet/
       "endRow": 5,
       "fields": ["Name", "Qty", "Amount"]
     }
-  ]
+  ],
+  "warnings": []
 }
 ```
+
+`warnings`：扫描期问题（如 `#Items` 无对应 `/Items`），不阻断保存。
 
 ### 4.4 占位符约定
 
 | 类型 | 语法 | 示例 |
 |------|------|------|
 | 简单字段 | `{{FieldName}}` | `{{CustomerName}}` |
-| 循环开始 | `{{#ListName}}` | `{{#Items}}`（可单独占一格或与同行字段共存于模板行） |
-| 循环结束 | `{{/ListName}}` | `{{/Items}}` |
+| 循环开始 | `{{#ListName}}` | 与模板行同行 |
+| 循环结束 | `{{/ListName}}` | 与模板行同行 |
 | 循环内字段 | `{{ListName.Field}}` | `{{Items.Name}}` |
 
-**循环行规则**
+**循环行规则（裁定）**
 
-- 模板行 = `startRow`..`endRow`（通常单行）；该行样式为蓝本
-- 填充时按数组长度复制行：N 条数据 → 保留/生成 N 行，删除标记占位符
-- 数组为空 → 删除模板行（或留一行空白，实现选「删除模板行」）
-- 简单字段在全表替换；未提供的字段保留原占位符并记入 `warnings`
+- v1 **仅支持单行模板**（`startRow == endRow`）；多行块写入 schema.warnings 且填充时跳过该 loop，并在响应 `warnings` 中说明
+- 模板行样式为蓝本；N 条数据 → N 行；填充后去掉 `#`/`/` 标记与未替换干净的循环语法
+- 数组为空或缺少数组键 → **删除该模板行**
+- 简单字段全表替换；请求未提供的字段 → 保留占位符原文，响应 `warnings` 增加一项
+- 循环标记不匹配：保存成功，schema.warnings 记录；填充时 **跳过该 loop**（HTTP 200），响应 `warnings` 说明，不返回 400
+- 合并单元格与循环行重叠：不做自动拆分；若检测到则 warnings，并跳过该 loop
 
 ### 4.5 填充请求体示例
 
@@ -137,31 +159,74 @@ SpreadSheet/
 }
 ```
 
-填充结果可不落库（试填下载），或通过 fill-save 另存为新 Document。
-
 ## 5. API
 
 基础路径: `/api`
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/documents` | 列表：id, title, updatedAt, currentVersionNo |
-| POST | `/documents` | 新建空白文档；body 可选 `{ "title": "..." }` |
-| GET | `/documents/{id}` | 详情 + 当前版本 workbookJson + schema |
-| PUT | `/documents/{id}` | 保存：`{ workbookJson, title?, remark? }` → 新 Version |
-| POST | `/documents/import` | multipart `.xlsx` → 新建 Document+Version |
-| GET | `/documents/{id}/versions` | 版本列表（不含大字段） |
-| GET | `/documents/{id}/versions/{versionId}` | 某版本 workbookJson |
-| GET | `/documents/{id}/export` | 下载当前版本 xlsx |
-| GET | `/documents/{id}/schema` | 当前 TemplateSchema |
-| POST | `/documents/{id}/fill?format=xlsx\|json` | body = 填充 JSON；返回文件或 workbook |
-| POST | `/documents/{id}/fill-save` | 填充并另存为新文档；返回新文档 id |
+| GET | `/documents` | `{ id, title, updatedAt, currentVersionNo }[]` |
+| POST | `/documents` | 见下方建档 body |
+| GET | `/documents/{id}` | `{ id, title, currentVersionId, versionNo, workbookJson, schema }` |
+| PUT | `/documents/{id}` | `{ workbookJson, title?, remark? }` → 新 Version；返回同 GET 形状 |
+| GET | `/documents/{id}/versions` | `{ id, versionNo, remark, createdAt }[]`（无 workbook） |
+| GET | `/documents/{id}/versions/{versionId}` | `{ id, versionNo, workbookJson, schema, createdAt, remark }` |
+| GET | `/documents/{id}/schema` | 当前版本 TemplateSchema 对象 |
+| POST | `/documents/{id}/fill` | 试填，见下方响应 |
+| POST | `/documents/{id}/fill-save` | 填充并另存，见下方 |
+
+**无** `POST /documents/import` multipart；**无** `GET .../export` 服务端文件下载；**无** DELETE。
+
+### 5.1 POST /documents（空白或导入建档）
+
+```json
+{
+  "title": "可选标题",
+  "workbookJson": null,
+  "remark": null
+}
+```
+
+- `workbookJson` 省略或 `null`：创建空白 workbook —— **裁定：前端用 Univer 创建空表后提交 JSON**，后端不捏造 Univer 结构；若请求无 workbookJson 则 400
+- `workbookJson` 有值：作为 Version 1 存库并扫描 schema（导入与新建共用此接口）
+- 响应：同 `GET /documents/{id}`
+
+### 5.2 POST /documents/{id}/fill
+
+- **始终返回 JSON**（无 format 双路径）
+- Body：填充数据对象（任意 JSON object）
+- 基于 **当前版本** WorkbookJson 填充（不修改已存版本）
+- 响应：
+
+```json
+{
+  "workbookJson": "{...}",
+  "schema": { },
+  "warnings": ["缺少字段: Foo"]
+}
+```
+
+前端：可加载 `workbookJson` 预览，或立刻 Univer 导出下载。非法 body → 400 `{ "message": "..." }`。
+
+### 5.3 POST /documents/{id}/fill-save
+
+- Body：
+
+```json
+{
+  "data": { },
+  "title": "填充结果-销售订单"
+}
+```
+
+- 基于当前版本填充 → 新建 Document（Title 默认 `原标题-填充`，或使用传入 title）→ Version 1 = 填充后 workbook + 重新扫描的 schema
+- 响应：`{ "id": "<newDocumentId>", "warnings": [] }`
 
 **错误约定**
 
-- 404：文档/版本不存在
-- 400：非 xlsx、损坏文件、JSON 非法；中文 `message`
-- 填充缺字段：HTTP 200，body 含 `warnings: string[]`
+- 404：文档/版本不存在；`{ "message": "文档不存在" }`
+- 400：JSON 非法、POST/PUT 缺少 workbookJson；中文 message
+- 填充业务告警：一律 200 + `warnings`（含缺字段、跳过的 loop）
 
 ## 6. 前端
 
@@ -169,66 +234,61 @@ SpreadSheet/
 
 | 路由 | 页面 |
 |------|------|
-| `/` | 文档列表：新建、导入、进入编辑、查看历史 |
-| `/editor/:id` | 编辑器；query `version` 可选，指定历史版本 |
-| `/editor/:id/versions` | 版本列表；点击进入 `/editor/:id?version=:vid` |
+| `/` | 文档列表：新建、导入 xlsx、进入编辑、查看历史 |
+| `/editor/:id` | 编辑器；`?version=` 可选加载历史版本 |
+| `/editor/:id/versions` | 版本列表 |
 
 ### 6.2 编辑器能力
 
-- Univer Sheets 空白启动或加载 WorkbookJson
-- 官方 Excel 导入/导出插件（样式保留）
-- 编辑单元格内容与样式（字体、对齐、边框、填充等）
-- 工具栏：保存、导出 Excel、模板填充、返回列表
-- 填充面板：展示 schema、编辑/粘贴 JSON、试填预览、下载 xlsx、另存为新文档
-- 保存失败时 sessionStorage 兜底本地草稿一次
+- Univer Sheets：空白/快照加载、样式编辑
+- **导入:** 列表页选文件 → Univer 解析 → `POST /documents` + workbookJson
+- **导出:** 工具栏「导出 Excel」→ 当前编辑器 Univer 导出插件下载
+- 保存、模板填充面板、返回列表
+- 填充面板：展示 schema、编辑 JSON、一键样例、试填预览（加载返回的 workbook）、导出下载、另存为新文档
+- 保存失败：sessionStorage 兜底草稿一次
 
 ### 6.3 演示数据
 
-内置种子文档「销售订单模板」：
-
-- 表头区简单字段：`{{CustomerName}}`、`{{OrderDate}}`
-- 明细循环行：`{{#Items}}` + `{{Items.Name}}` / `{{Items.Qty}}` / `{{Items.Amount}}` + `{{/Items}}`
-- 前端或 API 提供一键试填样例 JSON
+- **种子归属:** 后端启动时 Seed 写入「销售订单模板」Document（若库中尚无同名种子）
+- 含 `{{CustomerName}}`、`{{OrderDate}}` 与单行 `{{#Items}}`…`{{/Items}}`
+- 前端 FillPanel 内置与种子匹配的样例 JSON 按钮
 
 ## 7. 后端服务边界
 
-| 单元 | 职责 | 依赖 |
-|------|------|------|
-| DocumentService | CRUD、版本追加、列表 | DbContext |
-| ExcelBridge | xlsx ↔ 中间表示 / 与前端约定的导入协助；生成 XlsxBlob | 文件库（如 ClosedXML 兜底） |
-| TemplateScanner | 从 WorkbookJson 扫描占位符 → TemplateSchema | 无 |
-| FillEngine | 按 schema + 数据改写 workbook（简单替换 + 插行） | TemplateScanner 产出 |
-| DocumentsController | HTTP 适配 | 上述 Services |
+| 单元 | 职责 | 输入 → 输出 |
+|------|------|-------------|
+| DocumentService | 文档/版本 CRUD、事务内 VersionNo | 命令/查询 → 实体或 DTO |
+| TemplateScanner | 扫描 workbook JSON 占位符 | workbookJson → TemplateSchema |
+| FillEngine | 简单替换 + 单行循环展开 | workbookJson + data + schema → (workbookJson, warnings) |
+| DocumentsController | HTTP 适配 | HTTP ↔ 上述服务 |
+| SeedData | 启动写入演示模板 | DbContext |
 
-**填充执行位置:** 服务端在 WorkbookJson 上完成替换与插行，再序列化返回或生成 xlsx。前端 Univer 仅负责展示填充结果（format=json）或触发下载（format=xlsx）。
-
-**导入路径:** 优先前端 Univer 导入插件解析 xlsx 为 workbook，再 `POST /documents` 或专用 import 提交 JSON；若走服务端 multipart import，则后端解析 xlsx 为可被 Univer 加载的 workbook JSON（若服务端无法完美还原 Univer 模型，则强制「前端解析 + 后端只存 JSON」为主路径，multipart 作可选增强）。
-
-**主路径裁定:** **导入以前端 Univer 解析为主**，后端接收 `workbookJson` 建档；导出可由前端插件下载或后端返回 `XlsxBlob`。服务端 FillEngine 只操作 JSON。
+不设 ExcelBridge。
 
 ## 8. 错误处理与边界情况
 
 | 场景 | 行为 |
 |------|------|
-| 损坏/非 Excel 上传 | 400，提示「无法解析 Excel 文件」 |
-| 空循环数组 | 删除模板行 |
-| 循环标记不匹配 | 保存时 schema.warnings；填充时 400 或带 warnings 跳过该 loop |
-| 超大 workbook | 不设硬限；SQLite 单库，版本只追加（后续可加保留策略，本次不做） |
-| 并发保存 | 最后写入获胜；VersionNo 用事务内 max+1 |
+| 前端导入非 Excel | 前端拦截提示；不调用 API |
+| POST/PUT 无 workbookJson | 400 |
+| 空循环数组 / 缺少数组 | 删除模板行 |
+| 循环标记不匹配 / 多行 loop / 合并冲突 | 保存写入 schema.warnings；填充跳过该 loop + 响应 warnings |
+| 缺简单字段 | 保留占位符 + warnings |
+| 并发保存 | 最后写入获胜；VersionNo 事务内 max+1 |
 
 ## 9. 测试要点
 
 - 空白新建 → 编辑样式 → 保存 → 刷新再打开样式仍在
-- 导入带样式 xlsx → 导出对比关键样式
+- 导入带样式 xlsx → 前端导出 → Excel 中关键样式仍在
 - 保存 3 次 → 版本列表 3 条 → 打开 v1 再保存 → 出现 v4
-- 种子模板 + 样例 JSON → 循环行数量正确、简单字段已替换 → 导出可打开
-- 缺字段填充 → 200 + warnings
+- 种子模板 + 样例 JSON → 循环行数正确、简单字段已替换 → Univer 导出可打开
+- 缺字段 / 坏 loop 标记 → 200 + warnings
 
 ## 10. 实现顺序（供计划引用）
 
-1. 后端骨架 + EF 模型 + Documents/Versions API
-2. 前端列表 + Univer 编辑器挂载 + 保存/加载
-3. 导入（前端解析）+ 导出（WYSIWYG）
+1. 后端骨架 + EF 模型 + Documents/Versions API + Seed
+2. 前端列表 + Univer 挂载 + 保存/加载
+3. 前端导入 + 前端导出（WYSIWYG）
 4. 版本历史页
 5. TemplateScanner + FillEngine + 填充 API/面板
-6. 种子演示数据 + README 启动说明
+6. README 启动说明
