@@ -198,14 +198,17 @@ SpreadSheet/
 ### 5.2 填充与编辑器状态（裁定）
 
 - 服务端 fill / fill-save **只读已持久化的当前版本**（`CurrentVersionId`），不接受请求体中的临时 `workbookJson`，也不按 `?version=` 历史版本填充
-- **前端约定:** 打开填充面板前：若编辑器有未保存修改，先自动 `PUT` 保存（失败则中止填充并提示）；若 URL 带 `?version=`（正在看历史），填充按钮提示「请先保存为当前版本后再填充」或引导用户先保存（保存会把该历史内容追加为新当前版本）后再填
-- 试填成功后：前端用返回的 `workbookJson` **替换编辑器内容**（视为脏数据）；用户可再导出或手动保存；试填本身不写库
+- 前端维护两个脏标记：`templateDirty`（用户编辑模板未保存）、`previewDirty`（试填结果已加载到编辑器、尚未另存或丢弃）
+- **打开填充面板 / 发起 fill 或 fill-save 前：**
+  - 若 `templateDirty`：先自动 `PUT` 保存模板；失败则中止并提示
+  - 若仅 `previewDirty`：**禁止**自动 PUT（避免把已填充结果写成当前模板版本）；允许再次试填（仍基于库中当前版本）、允许「导出」、允许 fill-save；若用户点「保存」则明确提示「将把填充结果保存为新版本，模板占位符会丢失」并需确认
+  - 若 URL 带 `?version=`：禁用填充；提示先「保存为当前版本」（追加新 Version）后再填
+- 试填成功：前端加载返回的 `workbookJson`，设 `previewDirty=true`、`templateDirty=false`；试填本身不写库
+- 用户「放弃试填」：重新 `GET /documents/{id}` 加载当前版本，清除 `previewDirty`
 
 ### 5.3 POST /documents/{id}/fill
 
-- **始终返回 JSON**
 - Body：填充数据对象（任意 JSON object）
-- 基于 **当前版本** WorkbookJson 填充（不修改已存版本）
 - 响应：
 
 ```json
@@ -216,22 +219,24 @@ SpreadSheet/
 }
 ```
 
-非法 body → 400 `{ "message": "..." }`。
+- 响应中的 `schema` 为**填充前**当前版本已存的模板 schema（非填充后重扫）
+- 非法 body → 400 `{ "message": "..." }`
 
 ### 5.4 POST /documents/{id}/fill-save
 
-- Body：
-
-```json
-{
-  "data": { },
-  "title": "填充结果-销售订单"
-}
-```
-
-- 基于当前版本填充 → 新建 Document（Title 默认 `原标题-填充`，或使用传入 title）→ Version 1 = 填充后 workbook + 重新扫描的 schema
+- Body：`{ "data": { }, "title": "填充结果-销售订单" }`
+- `title` 省略时默认 `{原标题}-填充`
+- 基于库中当前版本填充 → 新建 Document → Version 1 = 填充后 workbook + **对填充结果重扫**的 schema
 - 响应：`{ "id": "<newDocumentId>", "warnings": [] }`
-  （同样要求前端先保存脏数据；历史版本视图下禁用另存填充）
+- 前端：`previewDirty` 不阻碍 fill-save（服务端仍读库中模板）；成功后跳转新文档；历史版本视图下禁用
+
+### 5.5 其它约定
+
+- `POST /documents` 省略 `title` 时默认 `未命名文档`
+- Seed 用固定 Document Id（常量 GUID）判断「尚无种子」；标题固定为 `销售订单模板`
+- `?version=` 加载走 `GET /documents/{id}/versions/{versionId}`，不走当前版本 GET
+- 不支持嵌套 loop；发现则 schema.warnings + 填充跳过
+- 循环项内缺字段：与简单字段相同，保留占位符 + warning
 
 **错误约定**
 
