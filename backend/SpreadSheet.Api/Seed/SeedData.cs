@@ -9,9 +9,13 @@ namespace SpreadSheet.Api.Seed;
 public static class SeedData
 {
     public static readonly Guid SalesOrderTemplateId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    public static readonly Guid ProductSpecTemplateId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
-    private const string SalesOrderTitle = "销售订单模板";
-    private const string WorkbookFileName = "sales-order-template.workbook.json";
+    private static readonly SeedTemplate[] Templates =
+    [
+        new(SalesOrderTemplateId, "销售订单模板", "sales-order-template.workbook.json"),
+        new(ProductSpecTemplateId, "製品仕様テンプレート", "product-spec-template.workbook.json")
+    ];
 
     private static readonly JsonSerializerOptions SchemaJsonOptions = new()
     {
@@ -25,18 +29,29 @@ public static class SeedData
         IHostEnvironment env,
         CancellationToken ct = default)
     {
-        if (await db.Documents.AsNoTracking().AnyAsync(d => d.Id == SalesOrderTemplateId, ct))
+        foreach (var template in Templates)
+            await EnsureTemplateSeededAsync(db, scanner, env, template, ct);
+    }
+
+    private static async Task EnsureTemplateSeededAsync(
+        AppDbContext db,
+        TemplateScanner scanner,
+        IHostEnvironment env,
+        SeedTemplate template,
+        CancellationToken ct)
+    {
+        if (await db.Documents.AsNoTracking().AnyAsync(d => d.Id == template.Id, ct))
             return;
 
-        var workbookJson = await LoadWorkbookJsonAsync(env, ct);
+        var workbookJson = await LoadWorkbookJsonAsync(env, template.FileName, ct);
         var schema = scanner.Scan(workbookJson);
         var schemaJson = JsonSerializer.Serialize(schema, SchemaJsonOptions);
         var now = DateTimeOffset.UtcNow;
 
         var doc = new Document
         {
-            Id = SalesOrderTemplateId,
-            Title = SalesOrderTitle,
+            Id = template.Id,
+            Title = template.Title,
             CreatedAt = now,
             UpdatedAt = now,
             CurrentVersionId = null
@@ -61,13 +76,16 @@ public static class SeedData
         await db.SaveChangesAsync(ct);
     }
 
-    internal static async Task<string> LoadWorkbookJsonAsync(IHostEnvironment env, CancellationToken ct = default)
+    internal static async Task<string> LoadWorkbookJsonAsync(
+        IHostEnvironment env,
+        string fileName,
+        CancellationToken ct = default)
     {
         var candidates = new[]
         {
-            Path.Combine(env.ContentRootPath, "Seed", WorkbookFileName),
-            Path.Combine(AppContext.BaseDirectory, "Seed", WorkbookFileName),
-            Path.Combine(AppContext.BaseDirectory, WorkbookFileName)
+            Path.Combine(env.ContentRootPath, "Seed", fileName),
+            Path.Combine(AppContext.BaseDirectory, "Seed", fileName),
+            Path.Combine(AppContext.BaseDirectory, fileName)
         };
 
         foreach (var path in candidates)
@@ -79,4 +97,6 @@ public static class SeedData
         throw new FileNotFoundException(
             $"Seed workbook not found. Tried: {string.Join("; ", candidates)}");
     }
+
+    private sealed record SeedTemplate(Guid Id, string Title, string FileName);
 }

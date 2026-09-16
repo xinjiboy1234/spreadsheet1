@@ -94,7 +94,10 @@ watch(
 
 <style scoped>
 .page {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 960px;
+  min-height: 100%;
   margin: 0 auto;
   padding: 1.5rem;
 }

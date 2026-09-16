@@ -59,7 +59,60 @@ function getWorkbookJson(): string {
   return JSON.stringify(snapshot)
 }
 
-function loadWorkbookJson(json: string) {
+function setGridlinesVisible(visible: boolean) {
+  const workbook = univerAPIInstance?.getActiveWorkbook()
+  if (!workbook) return
+  const hidden = !visible
+  for (const sheet of workbook.getSheets()) {
+    sheet.setHiddenGridlines(hidden)
+  }
+}
+
+type HtmlCapableRange = {
+  getA1Notation: () => string
+  getRow: () => number
+  getColumn: () => number
+  getLastRow: () => number
+  getLastColumn: () => number
+  getDataRegion: () => HtmlCapableRange
+  generateHTML: () => string
+}
+
+/**
+ * High-fidelity HTML via Univer clipboard USM→HTML (styles, merges, col widths).
+ * Uses the active selection; expands a single cell to its data region.
+ */
+function getRangeHtml(): { html: string; rangeA1: string } {
+  const workbook = univerAPIInstance?.getActiveWorkbook()
+  const sheet = workbook?.getActiveSheet()
+  if (!sheet) {
+    throw new Error('当前没有可用工作表')
+  }
+
+  let range = sheet.getActiveRange() as HtmlCapableRange | null
+  if (!range) {
+    throw new Error('请先选中要导出的单元格区域')
+  }
+
+  const isSingleCell =
+    range.getRow() === range.getLastRow() && range.getColumn() === range.getLastColumn()
+  if (isSingleCell) {
+    range = range.getDataRegion()
+  }
+
+  if (typeof range.generateHTML !== 'function') {
+    throw new Error('当前 Univer 版本不支持 generateHTML')
+  }
+
+  const html = range.generateHTML()
+  if (!html.trim()) {
+    throw new Error('选中区域没有可导出的内容')
+  }
+
+  return { html, rangeA1: range.getA1Notation() }
+}
+
+function loadWorkbookJson(json: string, gridlinesVisible = false) {
   if (!univerAPIInstance) return
   beginSuppressChange()
   try {
@@ -69,6 +122,7 @@ function loadWorkbookJson(json: string) {
       univerAPIInstance.disposeUnit(unitId)
     }
     univerAPIInstance.createWorkbook(parseWorkbookData(json))
+    setGridlinesVisible(gridlinesVisible)
   } finally {
     endSuppressChange()
   }
@@ -106,6 +160,8 @@ onMounted(() => {
   beginSuppressChange()
   try {
     univerAPI.createWorkbook(parseWorkbookData(props.workbookJson))
+    // Default: hide gridlines (toggle in editor can turn them on).
+    setGridlinesVisible(false)
   } finally {
     endSuppressChange()
   }
@@ -123,6 +179,8 @@ onBeforeUnmount(() => {
 defineExpose({
   getWorkbookJson,
   loadWorkbookJson,
+  setGridlinesVisible,
+  getRangeHtml,
 })
 </script>
 
@@ -134,6 +192,6 @@ defineExpose({
 .univer-host {
   width: 100%;
   height: 100%;
-  min-height: 480px;
+  min-height: 0;
 }
 </style>

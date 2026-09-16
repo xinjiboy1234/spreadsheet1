@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Import Sample Harness</title>
+  </head>
+  <body>
+    <h1>Import harness</h1>
+    <pre id="log">starting…</pre>
+    <script type="module">
+      import LuckyExcel from '@mertdeveci55/univer-import-export'
+
+      const logEl = document.getElementById('log')
+      const log = (x) => {
+        logEl.textContent += '\n' + (typeof x === 'string' ? x : JSON.stringify(x, null, 2))
+      }
+
+      try {
+        const res = await fetch('/DP-20260904-0009_merged.xlsx')
+        log({ fetchOk: res.ok, status: res.status })
+        const blob = await res.blob()
+        const file = new File([blob], 'DP-20260904-0009_merged.xlsx', {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+
+        const snapshot = await new Promise((resolve, reject) => {
+          LuckyExcel.transformExcelToUniver(file, resolve, reject)
+        })
+
+        const createRes = await fetch('/api/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'DP-20260904-0009_merged',
+            workbookJson: JSON.stringify(snapshot),
+          }),
+        })
+        const detail = await createRes.json()
+        log({ created: createRes.status, id: detail.id, title: detail.title })
+        window.__IMPORT_RESULT__ = { id: detail.id, snapshot }
+        location.href = `/editor/${detail.id}`
+      } catch (e) {
+        log({ error: String(e), stack: e?.stack })
+        window.__IMPORT_RESULT__ = { error: String(e) }
+      }
+    </script>
+  </body>
+</html>

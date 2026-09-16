@@ -11,7 +11,9 @@ import { exportExcelFile } from '../utils/excelIo'
 
 type SheetHostExpose = {
   getWorkbookJson: () => string
-  loadWorkbookJson: (json: string) => void
+  loadWorkbookJson: (json: string, gridlinesVisible?: boolean) => void
+  setGridlinesVisible: (visible: boolean) => void
+  getRangeHtml: () => { html: string; rangeA1: string }
 }
 
 const route = useRoute()
@@ -42,10 +44,15 @@ const loading = ref(false)
 const saving = ref(false)
 const fillBusy = ref(false)
 const fillPanelOpen = ref(false)
+const showGridlines = ref(false)
 const error = ref('')
 const status = ref('')
 const warnings = ref<string[]>([])
 const cachedSchema = ref<TemplateSchema | null>(null)
+
+function onToggleGridlines() {
+  sheetHost.value?.setGridlinesVisible(showGridlines.value)
+}
 
 function draftKey(id: string) {
   return `draft:${id}`
@@ -82,6 +89,7 @@ async function loadDocument() {
   ready.value = false
   workbookJson.value = null
   fillPanelOpen.value = false
+  showGridlines.value = false
   cachedSchema.value = null
 
   try {
@@ -234,6 +242,69 @@ async function onExportExcel() {
   }
 }
 
+function escapeHtmlAttr(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+function safeFileName(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'document'
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function onGetHtml() {
+  if (!sheetHost.value || !ready.value) return
+  error.value = ''
+  status.value = ''
+  try {
+    const { html, rangeA1 } = sheetHost.value.getRangeHtml()
+    const docTitle = (title.value || '未命名文档').trim() || '未命名文档'
+    const fullDoc = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtmlAttr(docTitle)} · ${escapeHtmlAttr(rangeA1)}</title>
+<style>
+  body { margin: 16px; background: #fff; }
+</style>
+</head>
+<body>
+${html}
+</body>
+</html>`
+
+    downloadBlob(
+      new Blob([fullDoc], { type: 'text/html;charset=utf-8' }),
+      `${safeFileName(docTitle)}_${rangeA1.replaceAll(':', '-')}.html`,
+    )
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([html], { type: 'text/plain' }),
+        }),
+      ])
+      status.value = `已导出并复制 HTML（${rangeA1}，保真剪贴板样式）`
+    } catch {
+      status.value = `已导出 HTML（${rangeA1}）；剪贴板复制失败，可直接打开下载文件`
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '获取 HTML 失败'
+  }
+}
+
 async function openFillPanel() {
   if (viewingHistory.value || !ready.value) return
   const saved = await ensureTemplateSavedForFill()
@@ -253,7 +324,7 @@ async function onTryFill(data: object) {
     if (!saved) return
 
     const { data: result } = await fill(id, data)
-    sheetHost.value.loadWorkbookJson(result.workbookJson)
+    sheetHost.value.loadWorkbookJson(result.workbookJson, showGridlines.value)
     markPreview()
     if (result.schema) {
       cachedSchema.value = result.schema
@@ -277,7 +348,7 @@ async function onDiscardPreview() {
   warnings.value = []
   try {
     const { data } = await get(id)
-    sheetHost.value.loadWorkbookJson(data.workbookJson || emptyWorkbookJson())
+    sheetHost.value.loadWorkbookJson(data.workbookJson || emptyWorkbookJson(), showGridlines.value)
     title.value = data.title || title.value
     versionNo.value = data.versionNo
     cachedSchema.value = data.schema ?? null
@@ -341,10 +412,28 @@ watch(
         <span v-if="previewDirty" class="dirty preview">试填预览</span>
       </div>
       <div class="toolbar-right">
+        <label class="gridlines-toggle" title="显示或隐藏单元格网格线">
+          <input
+            v-model="showGridlines"
+            type="checkbox"
+            :disabled="!ready"
+            @change="onToggleGridlines"
+          />
+          <span>网格线</span>
+        </label>
         <button type="button" class="btn primary" :disabled="saving || !ready" @click="onSave">
           {{ saving ? '保存中…' : '保存' }}
         </button>
         <button type="button" class="btn" :disabled="!ready" @click="onExportExcel">导出</button>
+        <button
+          type="button"
+          class="btn"
+          :disabled="!ready"
+          title="按当前选区生成保真 HTML（单格会扩展到数据区域）；同时下载并复制"
+          @click="onGetHtml"
+        >
+          获取 HTML
+        </button>
         <button
           type="button"
           class="btn"
@@ -391,8 +480,9 @@ watch(
 .editor-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .toolbar {
@@ -435,6 +525,26 @@ watch(
 
 .dirty.preview {
   color: #1d4ed8;
+}
+
+.gridlines-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  color: #444;
+  user-select: none;
+  cursor: pointer;
+}
+
+.gridlines-toggle:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.gridlines-toggle input {
+  margin: 0;
+  cursor: inherit;
 }
 
 .btn {

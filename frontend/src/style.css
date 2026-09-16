@@ -14,14 +14,24 @@
   box-sizing: border-box;
 }
 
-body {
+html,
+body,
+#app {
+  height: 100%;
   margin: 0;
+}
+
+body {
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100%;
+  min-height: 100dvh;
 }
 
 #app {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  min-height: 100dvh;
 }
 
 h1 {

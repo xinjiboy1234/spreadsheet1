@@ -1,0 +1,34 @@
+{
+  "OrderNo": "DP-20260904-0009",
+  "Products": [
+    {
+      "Desc": "マイクロモーションELITEコリオリ流量計, 1/10 インチ (DN2), 316Lステンレス鋼",
+      "PartNo": "CMF010M323NRAMJZZZ",
+      "Tags": "-",
+      "Qty": 1,
+      "Options": [
+        { "Code": "323", "Desc": "センサーサイズ / ライナー材質" },
+        { "Code": "N", "Desc": "プロセス接続" },
+        { "Code": "R", "Desc": "接続材質" },
+        { "Code": "A", "Desc": "ハウジング" },
+        { "Code": "M", "Desc": "校正/ 認証" },
+        { "Code": "J", "Desc": "電気接続" },
+        { "Code": "Z", "Desc": "追加オプション" },
+        { "Code": "Z", "Desc": "追加オプション" },
+        { "Code": "Z", "Desc": "追加オプション" }
+      ]
+    },
+    {
+      "Desc": "マイクロモーション 2700フィールドおよび一体型マウント式多変数流量、密度トランスミッタ",
+      "PartNo": "2700RA1BBAEZZZ",
+      "Tags": "-",
+      "Qty": 1,
+      "Options": [
+        { "Code": "R", "Desc": "マウント形式" },
+        { "Code": "A", "Desc": "電源" },
+        { "Code": "1", "Desc": "出力" },
+        { "Code": "B", "Desc": "認証" }
+      ]
+    }
+  ]
+}

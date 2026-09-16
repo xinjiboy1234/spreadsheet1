@@ -72,14 +72,42 @@ public class SeedDataTests : IDisposable
     }
 
     [Fact]
+    public async Task EnsureSeeded_InsertsProductSpecTemplateWithNestedLoops()
+    {
+        await SeedData.EnsureSeededAsync(_db, new TemplateScanner(), _env);
+
+        var doc = await _db.Documents
+            .Include(d => d.CurrentVersion)
+            .SingleAsync(d => d.Id == SeedData.ProductSpecTemplateId);
+
+        using var schemaDoc = JsonDocument.Parse(doc.CurrentVersion!.TemplateSchemaJson);
+        var root = schemaDoc.RootElement;
+        Assert.Empty(root.GetProperty("warnings").EnumerateArray());
+
+        var loops = root.GetProperty("loops").EnumerateArray().ToList();
+        Assert.Equal(2, loops.Count);
+
+        var products = loops.Single(l => l.GetProperty("name").GetString() == "Products");
+        Assert.Equal(2, products.GetProperty("startRow").GetInt32());
+        Assert.Equal(4, products.GetProperty("endRow").GetInt32());
+        Assert.Equal(0, products.GetProperty("depth").GetInt32());
+
+        var options = loops.Single(l => l.GetProperty("name").GetString() == "Options");
+        Assert.Equal(4, options.GetProperty("startRow").GetInt32());
+        Assert.Equal(4, options.GetProperty("endRow").GetInt32());
+        Assert.Equal("Products", options.GetProperty("parentName").GetString());
+        Assert.Equal(1, options.GetProperty("depth").GetInt32());
+    }
+
+    [Fact]
     public async Task EnsureSeeded_IsIdempotent()
     {
         var scanner = new TemplateScanner();
         await SeedData.EnsureSeededAsync(_db, scanner, _env);
         await SeedData.EnsureSeededAsync(_db, scanner, _env);
 
-        Assert.Equal(1, await _db.Documents.CountAsync());
-        Assert.Equal(1, await _db.DocumentVersions.CountAsync());
+        Assert.Equal(2, await _db.Documents.CountAsync());
+        Assert.Equal(2, await _db.DocumentVersions.CountAsync());
     }
 
     private static string FindApiContentRoot()

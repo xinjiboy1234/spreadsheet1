@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import EditorView from '../views/EditorView.vue'
 import ListView from '../views/ListView.vue'
+import RichTextView from '../views/RichTextView.vue'
 import VersionsView from '../views/VersionsView.vue'
 
 const router = createRouter({
@@ -10,6 +11,11 @@ const router = createRouter({
       path: '/',
       name: 'list',
       component: ListView,
+    },
+    {
+      path: '/rich-text',
+      name: 'rich-text',
+      component: RichTextView,
     },
     {
       path: '/editor/:id',

@@ -17,6 +17,7 @@ export function emptyWorkbook(): Partial<IWorkbookData> {
         name: 'Sheet1',
         rowCount: 100,
         columnCount: 20,
+        showGridlines: 0,
         cellData: {},
       },
     },

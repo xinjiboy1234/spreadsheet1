@@ -14,4 +14,10 @@ public class TemplateLoop
     public int StartRow { get; set; }
     public int EndRow { get; set; }
     public List<string> Fields { get; set; } = [];
+
+    /// <summary>Enclosing loop name, or null for a top-level loop.</summary>
+    public string? ParentName { get; set; }
+
+    /// <summary>Nesting depth; 0 for a top-level loop.</summary>
+    public int Depth { get; set; }
 }

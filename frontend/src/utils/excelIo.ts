@@ -1,4 +1,5 @@
 import LuckyExcel from '@mertdeveci55/univer-import-export'
+import { prepareSnapshotForExport } from './excelExportPrepare'
 
 /** Convert an Excel file to a Univer workbook snapshot object. */
 export function importExcelFile(file: File): Promise<object> {
@@ -17,9 +18,10 @@ export function importExcelFile(file: File): Promise<object> {
 
 /** Download a Univer workbook snapshot as an Excel file. */
 export function exportExcelFile(snapshot: object, fileName: string): Promise<void> {
+  const prepared = prepareSnapshotForExport(snapshot)
   return new Promise((resolve, reject) => {
     void LuckyExcel.transformUniverToExcel({
-      snapshot,
+      snapshot: prepared,
       fileName,
       success: () => {
         resolve()

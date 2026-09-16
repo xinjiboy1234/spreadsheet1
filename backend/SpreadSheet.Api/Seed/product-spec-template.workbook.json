@@ -1,0 +1,123 @@
+{
+  "id": "workbook-product-spec",
+  "name": "製品仕様テンプレート",
+  "appVersion": "0.25.1",
+  "locale": "zhCN",
+  "styles": {
+    "title": {
+      "bl": 1,
+      "fs": 14,
+      "ht": 2,
+      "vt": 2
+    },
+    "head": {
+      "bl": 1,
+      "ht": 2,
+      "vt": 2,
+      "bg": { "rgb": "#D9D9D9" },
+      "bd": {
+        "t": { "s": 1, "cl": { "rgb": "#000000" } },
+        "b": { "s": 1, "cl": { "rgb": "#000000" } },
+        "l": { "s": 1, "cl": { "rgb": "#000000" } },
+        "r": { "s": 1, "cl": { "rgb": "#000000" } }
+      }
+    },
+    "text": {
+      "ht": 1,
+      "vt": 2,
+      "bd": {
+        "t": { "s": 1, "cl": { "rgb": "#000000" } },
+        "b": { "s": 1, "cl": { "rgb": "#000000" } },
+        "l": { "s": 1, "cl": { "rgb": "#000000" } },
+        "r": { "s": 1, "cl": { "rgb": "#000000" } }
+      }
+    },
+    "num": {
+      "ht": 2,
+      "vt": 2,
+      "bd": {
+        "t": { "s": 1, "cl": { "rgb": "#000000" } },
+        "b": { "s": 1, "cl": { "rgb": "#000000" } },
+        "l": { "s": 1, "cl": { "rgb": "#000000" } },
+        "r": { "s": 1, "cl": { "rgb": "#000000" } }
+      }
+    },
+    "option": {
+      "ht": 1,
+      "vt": 2,
+      "bg": { "rgb": "#EAF0FB" },
+      "bd": {
+        "t": { "s": 1, "cl": { "rgb": "#000000" } },
+        "b": { "s": 1, "cl": { "rgb": "#000000" } },
+        "l": { "s": 1, "cl": { "rgb": "#000000" } },
+        "r": { "s": 1, "cl": { "rgb": "#000000" } }
+      }
+    },
+    "marker": {
+      "ht": 1,
+      "vt": 2
+    }
+  },
+  "sheetOrder": ["sheet-1"],
+  "sheets": {
+    "sheet-1": {
+      "id": "sheet-1",
+      "name": "Sheet1",
+      "rowCount": 100,
+      "columnCount": 8,
+      "defaultRowHeight": 22,
+      "showGridlines": 1,
+      "freeze": { "xSplit": 0, "ySplit": 2, "startRow": 2, "startColumn": -1 },
+      "columnData": {
+        "0": { "w": 24, "hd": 1 },
+        "1": { "w": 90 },
+        "2": { "w": 220 },
+        "3": { "w": 180 },
+        "4": { "w": 70 },
+        "5": { "w": 70 },
+        "6": { "w": 24, "hd": 1 }
+      },
+      "rowData": {
+        "0": { "h": 30 },
+        "1": { "h": 24 },
+        "2": { "h": 24 },
+        "3": { "h": 24 },
+        "4": { "h": 22 }
+      },
+      "mergeData": [
+        { "startRow": 0, "endRow": 0, "startColumn": 1, "endColumn": 5 },
+        { "startRow": 1, "endRow": 1, "startColumn": 1, "endColumn": 3 },
+        { "startRow": 2, "endRow": 2, "startColumn": 1, "endColumn": 3 },
+        { "startRow": 3, "endRow": 3, "startColumn": 1, "endColumn": 3 },
+        { "startRow": 2, "endRow": 4, "startColumn": 4, "endColumn": 4 },
+        { "startRow": 2, "endRow": 4, "startColumn": 5, "endColumn": 5 },
+        { "startRow": 4, "endRow": 4, "startColumn": 2, "endColumn": 3 }
+      ],
+      "cellData": {
+        "0": {
+          "1": { "v": "製品仕様書 {{OrderNo}}", "s": "title" }
+        },
+        "1": {
+          "1": { "v": "Model / Part", "s": "head" },
+          "4": { "v": "Tags", "s": "head" },
+          "5": { "v": "数量", "s": "head" }
+        },
+        "2": {
+          "0": { "v": "{{#Products}}", "s": "marker" },
+          "1": { "v": "{{Products.Desc}}", "s": "text" },
+          "4": { "v": "{{Products.Tags}}", "s": "num" },
+          "5": { "v": "{{Products.Qty}}", "s": "num" }
+        },
+        "3": {
+          "1": { "v": "{{Products.PartNo}}", "s": "text" }
+        },
+        "4": {
+          "0": { "v": "{{#Options}}", "s": "marker" },
+          "1": { "v": "{{Options.Code}}", "s": "option" },
+          "2": { "v": "{{Options.Desc}}", "s": "option" },
+          "6": { "v": "{{/Options}}{{/Products}}", "s": "marker" }
+        }
+      }
+    }
+  }
+}

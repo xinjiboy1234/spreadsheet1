@@ -99,6 +99,7 @@ onMounted(() => {
     <header class="header">
       <h1>文档列表</h1>
       <div class="actions">
+        <RouterLink class="btn" to="/rich-text">富文本编辑器</RouterLink>
         <button type="button" class="btn primary" :disabled="creating" @click="onCreate">
           {{ creating ? '新建中…' : '新建' }}
         </button>
@@ -145,7 +146,10 @@ onMounted(() => {
 
 <style scoped>
 .page {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 960px;
+  min-height: 100%;
   margin: 0 auto;
   padding: 1.5rem;
 }
@@ -172,12 +176,16 @@ onMounted(() => {
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
   padding: 0.4rem 0.85rem;
   border: 1px solid #ccc;
   border-radius: 4px;
   background: #fff;
+  color: inherit;
   cursor: pointer;
   font-size: 0.875rem;
+  text-decoration: none;
 }
 
 .btn:hover:not(:disabled) {
